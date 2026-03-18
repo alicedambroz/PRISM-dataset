@@ -1,0 +1,56 @@
+// AUTOMATICALLY GENERATED: location from saved link.
+Map.setCenter(264.8, 34.8, 4)
+
+// --- 1. DEFINE YOUR POINTS ---
+// If needed, replace with the actual path to your 'PRISM-points' asset.
+var tableId = "projects/high-island-creek/assets/PRISM-points"; 
+var stations = ee.FeatureCollection(tableId);
+
+Map.centerObject(stations, 9);
+Map.addLayer(stations, {color: 'red'}, '69 Weather Stations');
+
+// --- 2. DEFINE DATES AND DATASET ---
+var startDate = '1981-01-01';
+var endDate = '2026-01-31'; 
+
+// Load PRISM Daily 'ANd'.
+var prism = ee.ImageCollection('OREGONSTATE/PRISM/ANd')
+              .filterDate(startDate, endDate)
+              .select(['ppt', 'tmax', 'tmin', 'tdmean']); // Add other variables as needed.
+
+// --- 3. EXTRACT DATA FOR POINTS ---
+var stationData = prism.map(function(image) {
+  var stats = image.reduceRegions({
+    collection: stations,
+    reducer: ee.Reducer.first(), 
+    scale: 4000, 
+    crs: 'EPSG:4326'
+  });
+
+  // Keep original column information from the shapefile. Important for later on Colab.
+  return stats.map(function(feature) {
+    return feature.copyProperties(feature, feature.propertyNames())
+      .set({
+        'date_str': image.date().format('yyyyMMdd'),
+        'year': image.date().get('year'),
+        'doy': image.date().getRelative('day', 'year').add(1)
+      });
+  });
+}).flatten();
+
+// --- 4. FORMAT AND EXPORT TO DRIVE ---
+var dailyDataWithCoords = stationData.map(function(f) {
+  var coords = f.geometry().coordinates();
+  return f.set({
+    'longitude': coords.get(0),
+    'latitude': coords.get(1)
+  });
+});
+
+// IMPORTANT: Check if your shapefile has 'id' column or you might need to replace the name.
+Export.table.toDrive({
+  collection: dailyDataWithCoords,
+  description: 'SWAT_PRISM_69_Stations_Master',
+  fileFormat: 'CSV',
+  selectors: ['id', 'date_str', 'year', 'doy', 'ppt', 'tmax', 'tmin', 'tdmean', 'longitude', 'latitude'] 
+});
