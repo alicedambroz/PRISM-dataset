@@ -1,0 +1,51 @@
+// --- CONFIGURATION ---
+// 1. Load your Watershed Shapefile (Make sure to upload it to Assets first)
+var watershed = ee.FeatureCollection("projects/high-island-creek/assets/lesueur_boundary");
+
+// 2. Define Dates (Matching precipitation and temperature data)
+var startDate = '1981-01-01';
+var endDate = '2026-01-31'; // Or later if you need
+
+// --- ERA5-LAND DATA ---
+// We use the "Daily Aggregates" collection so we don't have to sum hourly data manually
+var collection = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR")
+  .filterDate(startDate, endDate)
+  .filterBounds(watershed)
+  .select('surface_solar_radiation_downwards_sum');
+
+// --- CONVERSION FUNCTION ---
+// Convert Joules/m² to MegaJoules/m² (Divide by 1,000,000)
+var convertToMJ = function(image) {
+  var solarMJ = image.multiply(0.000001)
+                     .rename('solar_mj_m2')
+                     .set('system:time_start', image.get('system:time_start'));
+  return solarMJ;
+};
+
+var solar_mj = collection.map(convertToMJ);
+
+// --- EXTRACT DATA TO TABLE ---
+var table = solar_mj.map(function(image) {
+  var date = image.date().format('YYYYMMdd');
+  
+  // Calculate the average solar radiation over the entire watershed
+  var value = image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: watershed,
+    scale: 11132, // ERA5 resolution is approx 11km
+    maxPixels: 1e9
+  }).get('solar_mj_m2');
+  
+  return ee.Feature(null, {
+    'date': date,
+    'solar_rad_MJ': value
+  });
+});
+
+// --- EXPORT TO DRIVE ---
+Export.table.toDrive({
+  collection: table,
+  description: 'Le-Sueur_Solar_Radiation_ERA5',
+  fileFormat: 'CSV',
+  folder: 'SWAT_Le-Sueur' // Will save to the same folder you've been using
+});
